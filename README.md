@@ -7,6 +7,12 @@ NLP кейс — LLM классификация отзывов
 Требования:
  - решение рассчитано на выполнение в Google Colab (16GB VRAM T4).
  - В директорию /content пользователь должен положить файлы train.csv и test.csv.
+ - В решении используется open-source модели с Hugging-Face, что может потребовать авторизации: внесите HF_TOKEN в среду окружения google colab или выполните авторизацию прямо в коде: 
+!pip install huggingface_hub
+
+from huggingface_hub import login
+my_token = "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" # для теста можете использовать мой токен - через неделю обновлю
+login(my_token)
 
 Ключевые этапы решения задачи
 
@@ -31,7 +37,7 @@ NLP кейс — LLM классификация отзывов
     4. Обратный перевод (back_translate): текст переводится на английский и обратно на русский -> получаю естественные переформулировки.
  - для "недопредставленных" классов создавались новые синтетические примеры на основе исходных отзывов.
 
-Такой подход позволил выровнять количество примеров между категориями и повысить устойчивость модели, что положительно сказалось на метрике Weighted F1.
+Такой подход позволил выровнять количество примеров между категориями и повысить устойчивость модели, что положительно сказалось на метрике Weighted F1. Модель для перевода deep_translator выбрана не случайно, а в результате экспериментов (сравнивал с моделью Helsinki-NLP/opus-mt-en-ru / -ru-en).
 
 
 3. Обучение модели:
@@ -40,6 +46,27 @@ NLP кейс — LLM классификация отзывов
  - Дополнительно тестировались более ресурсоёмкие модели с дообучением адаптеров и quantization (QLoRA), однако выигрыш оказался минимальным при существенном росте потребления GPU и времени обучения, даже при использовании 1.1 % обучаемых параметров.
  
  - обучение и инференс выполнялись в рамках доступных ресурсов Google Colab: среднее потребление GPU составило 6464MiB / 15360MiB.
+Также выбор не случайнен - сравнивал с QLoRA дообучением vicgalle/xlm-roberta-large-xnli-anli:
+MODEL_NAME = "vicgalle/xlm-roberta-large-xnli-anli"
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_use_double_quant=True,
+    bnb_4bit_quant_type="nf4",
+    bnb_4bit_compute_dtype=torch.bfloat16
+)
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token if tokenizer.eos_token else tokenizer.unk_token
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_NAME,
+    num_labels=9,
+    quantization_config=bnb_config,
+    device_map={"": 0}
+)
+
+Показатель weighted-F1 приблизительно 0.9 при значительном увеличении потребления GPU и времени fine-tunning.
 
 4. Оценка качества и инференс:
  - для оценки использовалась метрика Weighted F1 по всем категориям, включая «нет товара».
